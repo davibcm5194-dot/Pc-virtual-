@@ -1,0 +1,66 @@
+
+name: Desktop Linux com VNC e Ngrok
+
+on:
+  workflow_dispatch:
+
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+
+    steps:
+      - name: Instalar ambiente XFCE e VNC
+        run: |
+          sudo apt update
+          sudo apt install -y xfce4 xfce4-goodies tigervnc-standalone-server tigervnc-common
+
+          mkdir -p ~/.vnc
+
+          printf '%s\n' "$VNC_PASSWORD" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+
+          cat > ~/.vnc/xstartup <<'EOF'
+          #!/bin/sh
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          startxfce4 &
+          EOF
+
+          chmod +x ~/.vnc/xstartup
+
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
+
+        env:
+          VNC_PASSWORD: ${{ secrets.VNC_PASSWORD }}
+
+      - name: Instalar Ngrok
+        run: |
+          curl -sL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
+          unzip -o ngrok.zip
+          sudo install ngrok /usr/local/bin/ngrok
+
+          ngrok config add-authtoken "$NGROK_AUTH_TOKEN"
+
+          nohup ngrok tcp 5901 --log=stdout > /tmp/ngrok.log 2>&1 &
+
+          for i in {1..30}; do
+            URL=$(curl -fsS http://127.0.0.1:4040/api/tunnels | python3 -c "import sys,json; print(json.load(sys.stdin)['tunnels'][0]['public_url'])" 2>/dev/null || true)
+            if [ -n "$URL" ]; then
+              echo "ENDEREÇO VNC: $URL"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$URL" ]; then
+            echo "Não foi possível obter o endereço Ngrok."
+            cat /tmp/ngrok.log
+            exit 1
+          fi
+
+      - name: Manter máquina ativa
+        run: |
+          echo "Desktop Linux iniciado!"
+          sleep infinity
+          
